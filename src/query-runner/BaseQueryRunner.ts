@@ -144,6 +144,25 @@ export abstract class BaseQueryRunner implements AsyncDisposable {
     ): Promise<any>
 
     /**
+     * Determines if a failed transaction error is retryable.
+     * Drivers can override this to support automatic transaction retries.
+     * @param _err
+     * @param _retries
+     */
+    isRetryableTransactionError(_err: unknown, _retries: number): boolean {
+        return false
+    }
+
+    /**
+     * Returns the delay in milliseconds before retrying a failed transaction.
+     * Only called when isRetryableTransactionError returns true.
+     * @param _retries
+     */
+    getTransactionRetryDelay(_retries: number): number {
+        return 0
+    }
+
+    /**
      * Tagged template function that executes raw SQL query and returns raw database results.
      * Template expressions are automatically transformed into database parameters.
      * Raw query execution is supported only by relational databases (MongoDB is not supported).

@@ -633,6 +633,14 @@ export class MongoQueryRunner implements QueryRunner {
         // transactions are not supported by mongodb driver, so simply don't do anything here
     }
 
+    isRetryableTransactionError(_err: unknown, _retries: number): boolean {
+        return false
+    }
+
+    getTransactionRetryDelay(_retries: number): number {
+        return 0
+    }
+
     /**
      * Executes a given SQL query.
      * @param query

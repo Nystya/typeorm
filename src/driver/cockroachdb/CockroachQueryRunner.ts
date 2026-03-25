@@ -75,6 +75,27 @@ export class CockroachQueryRunner
     // -------------------------------------------------------------------------
 
     /**
+     * Determines if a failed transaction error is a CockroachDB
+     * serialization error (40001) eligible for retry.
+     * @param err
+     * @param retries
+     */
+    isRetryableTransactionError(err: unknown, retries: number): boolean {
+        return (
+            (err as any)?.code === "40001" &&
+            retries < (this.driver.options.maxTransactionRetries ?? 0)
+        )
+    }
+
+    /**
+     * Returns exponential backoff delay with jitter for transaction retries.
+     * @param retries
+     */
+    getTransactionRetryDelay(retries: number): number {
+        return 2 ** retries * 0.1 * (Math.random() + 0.5) * 1000
+    }
+
+    /**
      * Creates/uses database connection from the connection pool to perform further operations.
      * Returns obtained database connection.
      */

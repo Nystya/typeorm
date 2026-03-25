@@ -13,7 +13,6 @@ import { TreeRepository } from "../repository/TreeRepository"
 import { Repository } from "../repository/Repository"
 import { PlainObjectToNewEntityTransformer } from "../query-builder/transformer/PlainObjectToNewEntityTransformer"
 import { PlainObjectToDatabaseEntityTransformer } from "../query-builder/transformer/PlainObjectToDatabaseEntityTransformer"
-import { QueryFailedError } from "../error/QueryFailedError"
 import { TreeRepositoryNotSupportedError, TypeORMError } from "../error"
 import type { QueryRunner } from "../query-runner/QueryRunner"
 import type { SelectQueryBuilder } from "../query-builder/SelectQueryBuilder"
@@ -154,16 +153,6 @@ export class EntityManager {
         const queryRunner =
             this.queryRunner || this.dataSource.createQueryRunner()
 
-        // Determine CockroachDB retry settings.
-        // Only retry when we own the query runner (not caller-managed),
-        // which also prevents retrying nested transactions.
-        const maxRetries =
-            !this.queryRunner &&
-            this.dataSource.driver.options.type === "cockroachdb"
-                ? ((this.dataSource.driver.options as any)
-                      .maxTransactionRetries ?? 0)
-                : 0
-
         try {
             let retries = 0
             while (true) {
@@ -178,18 +167,22 @@ export class EntityManager {
                         await queryRunner.rollbackTransaction()
                     } catch (rollbackError) {}
 
-                    // Retry on CockroachDB serialization error (40001)
+                    // Allow drivers to retry on transient transaction errors
+                    // (e.g. CockroachDB serialization errors).
+                    // Only retry when we own the query runner (not caller-managed),
+                    // which also prevents retrying nested transactions.
                     if (
-                        err instanceof QueryFailedError &&
-                        (err as any).code === "40001" &&
-                        retries < maxRetries
+                        !this.queryRunner &&
+                        queryRunner.isRetryableTransactionError(err, retries)
                     ) {
                         retries++
-                        const sleepTime =
-                            2 ** retries * 0.1 * (Math.random() + 0.5) * 1000
-                        await new Promise((resolve) =>
-                            setTimeout(resolve, sleepTime),
-                        )
+                        const delay =
+                            queryRunner.getTransactionRetryDelay(retries)
+                        if (delay > 0) {
+                            await new Promise((resolve) =>
+                                setTimeout(resolve, delay),
+                            )
+                        }
                         continue
                     }
 

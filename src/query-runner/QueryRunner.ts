@@ -107,6 +107,18 @@ export interface QueryRunner extends AsyncDisposable {
     rollbackTransaction(): Promise<void>
 
     /**
+     * Determines if a failed transaction error is retryable.
+     * Drivers can override this to support automatic transaction retries.
+     */
+    isRetryableTransactionError(err: unknown, retries: number): boolean
+
+    /**
+     * Returns the delay in milliseconds before retrying a failed transaction.
+     * Only called when isRetryableTransactionError returns true.
+     */
+    getTransactionRetryDelay(retries: number): number
+
+    /**
      * Executes a given SQL query and returns raw database results.
      */
     query(
