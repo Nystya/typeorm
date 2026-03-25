@@ -70,6 +70,9 @@ export interface CockroachDataSourceOptions
 
     /**
      * Max number of transaction retries in case of 40001 error.
+     * Only applies to callback-based transactions (EntityManager.transaction()).
+     * Manual transactions (startTransaction/commitTransaction) are not retried.
+     * Defaults to 0 (no retries).
      */
     readonly maxTransactionRetries?: number
 }

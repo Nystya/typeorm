@@ -13,6 +13,7 @@ import { TreeRepository } from "../repository/TreeRepository"
 import { Repository } from "../repository/Repository"
 import { PlainObjectToNewEntityTransformer } from "../query-builder/transformer/PlainObjectToNewEntityTransformer"
 import { PlainObjectToDatabaseEntityTransformer } from "../query-builder/transformer/PlainObjectToDatabaseEntityTransformer"
+import { QueryFailedError } from "../error/QueryFailedError"
 import { TreeRepositoryNotSupportedError, TypeORMError } from "../error"
 import type { QueryRunner } from "../query-runner/QueryRunner"
 import type { SelectQueryBuilder } from "../query-builder/SelectQueryBuilder"
@@ -153,17 +154,48 @@ export class EntityManager {
         const queryRunner =
             this.queryRunner || this.dataSource.createQueryRunner()
 
+        // Determine CockroachDB retry settings.
+        // Only retry when we own the query runner (not caller-managed),
+        // which also prevents retrying nested transactions.
+        const maxRetries =
+            !this.queryRunner &&
+            this.dataSource.driver.options.type === "cockroachdb"
+                ? ((this.dataSource.driver.options as any)
+                      .maxTransactionRetries ?? 0)
+                : 0
+
         try {
-            await queryRunner.startTransaction(isolation)
-            const result = await runInTransaction(queryRunner.manager)
-            await queryRunner.commitTransaction()
-            return result
-        } catch (err) {
-            try {
-                // we throw original error even if rollback thrown an error
-                await queryRunner.rollbackTransaction()
-            } catch (rollbackError) {}
-            throw err
+            let retries = 0
+            while (true) {
+                try {
+                    await queryRunner.startTransaction(isolation)
+                    const result = await runInTransaction(queryRunner.manager)
+                    await queryRunner.commitTransaction()
+                    return result
+                } catch (err) {
+                    try {
+                        // we throw original error even if rollback thrown an error
+                        await queryRunner.rollbackTransaction()
+                    } catch (rollbackError) {}
+
+                    // Retry on CockroachDB serialization error (40001)
+                    if (
+                        err instanceof QueryFailedError &&
+                        (err as any).code === "40001" &&
+                        retries < maxRetries
+                    ) {
+                        retries++
+                        const sleepTime =
+                            2 ** retries * 0.1 * (Math.random() + 0.5) * 1000
+                        await new Promise((resolve) =>
+                            setTimeout(resolve, sleepTime),
+                        )
+                        continue
+                    }
+
+                    throw err
+                }
+            }
         } finally {
             if (!this.queryRunner)
                 // if we used a new query runner provider then release it
